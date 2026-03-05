@@ -65,21 +65,21 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         # 1. 优先匹配 github.com/owner/repo 格式
         github_pattern = r"https?://github\.com/([a-zA-Z0-9-_]+)/([a-zA-Z0-9-_\.]+)"
         match = re.search(github_pattern, content)
-        
+
         if match:
             owner, repo = match.groups()
             # 清理 repo 名称，去掉可能的 .git 后缀或末尾的标点
             repo = repo.rstrip(".git").rstrip(".,)")
-            
+
             full_url = f"https://github.com/{owner}/{repo}"
             code_info["code_url"] = full_url
-            
+
             # 尝试调用 GitHub API 获取信息
             github_token = os.environ.get("TOKEN_GITHUB")
             headers = {"Accept": "application/vnd.github.v3+json"}
             if github_token:
                 headers["Authorization"] = f"token {github_token}"
-            
+
             try:
                 api_url = f"https://api.github.com/repos/{owner}/{repo}"
                 resp = requests.get(api_url, headers=headers, timeout=5)
@@ -95,14 +95,14 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         # 2. 如果没有 github.com，尝试匹配 github.io
         github_io_pattern = r"https?://[a-zA-Z0-9-_]+\.github\.io(?:/[a-zA-Z0-9-_\.]+)*"
         match_io = re.search(github_io_pattern, content)
-        
+
         if match_io:
             url = match_io.group(0)
             # 清理末尾标点
             url = url.rstrip(".,)")
             code_info["code_url"] = url
             # github.io 不进行 star 和 update 判断
-                
+
         return code_info
 
     # 检查 summary 字段
@@ -123,7 +123,7 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         "result": "Result analysis unavailable",
         "conclusion": "Conclusion extraction failed"
     }
-    
+
     try:
         response: Structure = chain.invoke({
             "language": language,
@@ -134,7 +134,7 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         # 尝试从错误信息中提取 JSON 字符串并修复
         error_msg = str(e)
         partial_data = {}
-        
+
         if "Function Structure arguments:" in error_msg:
             try:
                 # 提取 JSON 字符串
@@ -145,7 +145,7 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
                 partial_data = json.loads(json_str)
             except Exception as json_e:
                 print(f"Failed to parse JSON for {item.get('id', 'unknown')}: {json_e}", file=sys.stderr)
-        
+
         # Merge partial data with defaults to ensure all fields exist
         item['AI'] = {**default_ai_fields, **partial_data}
         print(f"Using partial AI data for {item.get('id', 'unknown')}: {list(partial_data.keys())}", file=sys.stderr)
@@ -153,7 +153,7 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         # Catch any other exceptions and provide default values
         print(f"Unexpected error for {item.get('id', 'unknown')}: {e}", file=sys.stderr)
         item['AI'] = default_ai_fields
-    
+
     # Final validation to ensure all required fields exist
     for field in default_ai_fields.keys():
         if field not in item['AI']:
@@ -169,14 +169,14 @@ def process_all_items(data: List[Dict], model_name: str, language: str, max_work
     """并行处理所有数据项"""
     llm = ChatOpenAI(model=model_name).with_structured_output(Structure, method="function_calling")
     print('Connect to:', model_name, file=sys.stderr)
-    
+
     prompt_template = ChatPromptTemplate.from_messages([
         SystemMessagePromptTemplate.from_template(system),
         HumanMessagePromptTemplate.from_template(template=template)
     ])
 
     chain = prompt_template | llm
-    
+
     # 使用线程池并行处理
     processed_data = [None] * len(data)  # 预分配结果列表
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -185,7 +185,7 @@ def process_all_items(data: List[Dict], model_name: str, language: str, max_work
             executor.submit(process_single_item, chain, item, language): idx
             for idx, item in enumerate(data)
         }
-        
+
         # 使用tqdm显示进度
         for future in tqdm(
             as_completed(future_to_idx),
@@ -207,7 +207,7 @@ def process_all_items(data: List[Dict], model_name: str, language: str, max_work
                     "result": "Processing failed",
                     "conclusion": "Processing failed"
                 }
-    
+
     return processed_data
 
 def main():
@@ -237,7 +237,7 @@ def main():
 
     data = unique_data
     print('Open:', args.data, file=sys.stderr)
-    
+
     # 并行处理所有数据
     processed_data = process_all_items(
         data,
@@ -245,7 +245,7 @@ def main():
         language,
         args.max_workers
     )
-    
+
     # 保存结果
     with open(target_file, "w") as f:
         for item in processed_data:
